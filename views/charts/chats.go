@@ -19,6 +19,7 @@ import (
 	"helm.sh/helm/v3/pkg/downloader"
 	"helm.sh/helm/v3/pkg/getter"
 	"helm.sh/helm/v3/pkg/strvals"
+	"helm.sh/helm/v3/pkg/storage/driver"
 	"sigs.k8s.io/yaml"
 
 	"helm-api/util"
@@ -46,11 +47,12 @@ type releaseOptions struct {
 	SetStringValues []string `json:"set_string"`
 }
 
+
 var settings = cli.New()
 
 func actionConfigInit(cluster int, namespace string) (action.Configuration, error) {
+	settings.Debug, _ = strconv.ParseBool(os.Getenv("HELM_DEBUG"))
 	actionConfig := new(action.Configuration)
-	kubeCluster := new(models.Cluster)
 	kubeCluster, err := models.GetCluster(cluster)
 	if err != nil {
 		glog.Errorf("%+v", err)
@@ -164,9 +166,9 @@ func Update(c *gin.Context) {
 	var options releaseOptions
     err := c.BindJSON(&options)
     if err != nil && err != io.EOF {
-            util.RespErr(c, err)
-            return
-    }
+        util.RespErr(c, err)
+        return
+	}
 	actionConfig, err := actionConfigInit(cluster, namespace)
 	if err != nil {
 		util.RespErr(c, err)
@@ -177,8 +179,43 @@ func Update(c *gin.Context) {
 		util.RespErr(c, err)
 		return
 	}
-	client := action.NewInstall(&actionConfig)
-	rel, err := runInstall(name, chart, client, vals)
+	client := action.NewUpgrade(&actionConfig)
+	histClient := action.NewHistory(&actionConfig)
+	histClient.Max = 1
+	if _, err := histClient.Run(name); err == driver.ErrReleaseNotFound {
+		instClient := action.NewInstall(&actionConfig)
+		instClient.Namespace = namespace
+		rel, err := runInstall(name, chart, instClient, vals)
+		if err != nil {
+			util.RespErr(c, err)
+			return
+		}
+		util.RespOK(c, rel)
+	} else if err != nil {
+		util.RespErr(c, err)
+		return
+	}
+	chartPath, err := client.ChartPathOptions.LocateChart(chart, settings)
+	if err != nil {
+		util.RespErr(c, err)
+		return
+	}
+
+	// Check chart dependencies to make sure all are present in /charts
+	ch, err := loader.Load(chartPath)
+	if err != nil {
+		util.RespErr(c, err)
+		return
+	}
+	if req := ch.Metadata.Dependencies; req != nil {
+		if err := action.CheckDependencies(ch, req); err != nil {
+			util.RespErr(c, err)
+			return
+		}
+	}
+
+	client.Namespace = namespace
+	rel, err := client.Run(name, ch, vals)
 	if err != nil {
 		util.RespErr(c, err)
 		return
@@ -214,14 +251,7 @@ func runInstall(name string, chart string, client *action.Install, vals map[stri
 		return nil, err
 	}
 
-	// if chartRequested.Metadata.Deprecated {
-	// 	fmt.Fprintln("WARNING: This chart is deprecated")
-	// }
-
 	if req := chartRequested.Metadata.Dependencies; req != nil {
-		// If CheckDependencies returns an error, we have unfulfilled dependencies.
-		// As of Helm 2.4.0, this is treated as a stopping condition:
-		// https://github.com/helm/helm/issues/2209
 		if err := action.CheckDependencies(chartRequested, req); err != nil {
 			if client.DependencyUpdate {
 				man := &downloader.Manager{
@@ -245,7 +275,6 @@ func runInstall(name string, chart string, client *action.Install, vals map[stri
 			}
 		}
 	}
-	client.Namespace = settings.Namespace()
 	return client.Run(chartRequested, vals)
 }
 
