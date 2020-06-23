@@ -9,7 +9,7 @@ make
 make install  
 
 ## 配置
-vim /etc/profile
+vim /etc/profile  
 export GO111MODULE=on  
 GOPROXY=https://goproxy.io  
 export GOPROXY  
