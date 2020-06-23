@@ -9,6 +9,13 @@ make
 make install  
 
 ## 配置
+vim /etc/profile
+export GO111MODULE=on  
+GOPROXY=https://goproxy.io  
+export GOPROXY  
+
+source /etc/profile  
+
 vim /opt/helm-api/conf/app.ini  
 [database]  
 Type = mysql  
