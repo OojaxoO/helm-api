@@ -22,5 +22,6 @@ func main() {
 			"message": "pong",
 		})
 	})
-	r.Run(":10000")
+	port := setting.HttpSetting.Port
+	r.Run(":" + port)
 }

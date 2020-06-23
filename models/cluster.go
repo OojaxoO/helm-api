@@ -1,8 +1,6 @@
 package models
 
 import (
-	// "fmt"
-
 	"github.com/jinzhu/gorm"
 )
 
@@ -17,7 +15,7 @@ func GetCluster(id int) (*Cluster, error) {
 	var cluster Cluster 
 	err := db.Where("id = ?", id).First(&cluster).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
-			return nil, err
+		return nil, err
 	}
 	return &cluster, nil
 }

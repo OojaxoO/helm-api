@@ -4,7 +4,6 @@ import (
 	"os"
 	"io"
 	"strconv"
-	"fmt"
 
 
 	"github.com/golang/glog"
@@ -18,9 +17,8 @@ import (
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/downloader"
 	"helm.sh/helm/v3/pkg/getter"
-	"helm.sh/helm/v3/pkg/strvals"
+	"helm.sh/helm/v3/pkg/kube"
 	"helm.sh/helm/v3/pkg/storage/driver"
-	"sigs.k8s.io/yaml"
 
 	"helm-api/util"
 	"helm-api/models"
@@ -35,16 +33,11 @@ type releaseElement struct {
 	Chart        string `json:"chart"`
 	ChartVersion string `json:"chart_version"`
 	AppVersion   string `json:"app_version"`
-
 	Notes string `json:"notes,omitempty"`
-
-	// TODO: Test Suite?
 }
 
 type releaseOptions struct {
-	Values          string   `json:"values"`
-	SetValues       []string `json:"set"`
-	SetStringValues []string `json:"set_string"`
+	Values       map[string]interface {} `json:"values"`
 }
 
 
@@ -61,8 +54,9 @@ func actionConfigInit(cluster int, namespace string) (action.Configuration, erro
 	kubeConfig := "/tmp/config"
 	kubeContext := kubeCluster.Config 
 	util.WriteFile(kubeConfig, kubeContext)
-	settings.KubeConfig = kubeConfig 
-	err = actionConfig.Init(settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), glog.Infof)
+	settings.KubeConfig = kubeConfig
+	clientConfig := kube.GetConfig(settings.KubeConfig, settings.KubeContext, namespace)
+	err = actionConfig.Init(clientConfig, namespace, os.Getenv("HELM_DRIVER"), glog.Infof)
 	if err != nil {
 		glog.Errorf("%+v", err)
 		return *actionConfig, err
@@ -135,29 +129,6 @@ func Retrieve(c *gin.Context) {
 	util.RespOK(c, results)
 }
 
-func mergeValues(options releaseOptions) (map[string]interface{}, error) {
-	vals := map[string]interface{}{}
-	err := yaml.Unmarshal([]byte(options.Values), &vals)
-	if err != nil {
-			return vals, fmt.Errorf("failed parsing values")
-	}
-
-	for _, value := range options.SetValues {
-			if err := strvals.ParseInto(value, vals); err != nil {
-					return vals, fmt.Errorf("failed parsing set data")
-			}
-	}
-
-	for _, value := range options.SetStringValues {
-			if err := strvals.ParseIntoString(value, vals); err != nil {
-					return vals, fmt.Errorf("failed parsing set_string data")
-			}
-	}
-
-	return vals, nil
-}
-
-
 func Update(c *gin.Context) {
 	namespace := c.Param("namespace")
 	name := c.Param("name")
@@ -174,12 +145,13 @@ func Update(c *gin.Context) {
 		util.RespErr(c, err)
 		return
 	}
-	vals, err := mergeValues(options)
+	vals := options.Values
 	if err != nil {
 		util.RespErr(c, err)
 		return
 	}
 	client := action.NewUpgrade(&actionConfig)
+	client.Namespace = namespace
 	histClient := action.NewHistory(&actionConfig)
 	histClient.Max = 1
 	if _, err := histClient.Run(name); err == driver.ErrReleaseNotFound {
@@ -191,6 +163,7 @@ func Update(c *gin.Context) {
 			return
 		}
 		util.RespOK(c, rel)
+		return
 	} else if err != nil {
 		util.RespErr(c, err)
 		return
@@ -280,5 +253,19 @@ func runInstall(name string, chart string, client *action.Install, vals map[stri
 
 
 func Delete(c *gin.Context) {
-
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	cluster := com.StrTo(c.Param("cluster")).MustInt()
+	actionConfig, err := actionConfigInit(cluster, namespace)
+	if err != nil {
+		util.RespErr(c, err)
+		return
+	}
+	client := action.NewUninstall(&actionConfig)
+	results, err := client.Run(name)
+	if err != nil {
+		util.RespErr(c, err)
+		return
+	}
+	util.RespOK(c, results)
 }
