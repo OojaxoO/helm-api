@@ -29,4 +29,20 @@ TablePrefix = kube_
 Port = 10000  
 
 ## 运行
-/opt/helm-api/helm-api  
+cd /opt/helm-api/
+./helm-api  
+
+## 使用
+1. helm list -n namespace  
+GET /charts/:cluster/:namespace/
+
+2. helm get all -n namespace name  
+GET /charts/:cluster/:namespace/:name
+
+3. helm upgrade --install name chart -n namespace  
+POST /charts/:cluster/:namespace/:name?chart=:chart
+
+4. helm delete name -n namespace  
+DELETE /charts/:cluster/:namespace/:name
+
+
